@@ -1,11 +1,10 @@
 from setuptools import setup
 
-
 _REQUIRED = [
     "numpy",
     "einops",
     "tqdm",
-    # TODO: remove this upper bound 
+    # TODO: remove this upper bound
     # currently, when using ray we get:
     # "AttributeError: module 'pydantic._internal' has no attribute '_model_construction'"
     "pydantic>=2.0.0,<2.5.0",
@@ -18,8 +17,8 @@ _OPTIONAL = {
         "seaborn",
         "matplotlib",
     ],
-    "extra":[
-        "rich", 
+    "extra": [
+        "rich",
         "ray",
         "PyYAML",
     ]

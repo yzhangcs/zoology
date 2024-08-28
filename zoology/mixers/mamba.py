@@ -1,19 +1,23 @@
 # Copyright (c) 2023, Albert Gu, Tri Dao.
 import math
+from typing import Optional
+
 import torch
 import torch.nn as nn
-from torch import Tensor
-from typing import Optional
 from einops import rearrange, repeat
 from pydantic import validate_call
+from torch import Tensor
 
-from zoology.mixers.mamba_ssm.triton.layernorm import RMSNorm, layer_norm_fn, rms_norm_fn
+from zoology.mixers.mamba_ssm.triton.layernorm import (RMSNorm, layer_norm_fn,
+                                                       rms_norm_fn)
+
 try:
     from causal_conv1d import causal_conv1d_fn
 except:
     assert 0, print(f"Need to install causal_conv1d: pip install causal_conv1d")
 try:
-    from zoology.mixers.mamba_ssm.selective_scan_interface import selective_scan_fn, mamba_inner_fn
+    from zoology.mixers.mamba_ssm.selective_scan_interface import (
+        mamba_inner_fn, selective_scan_fn)
 except:
     assert 0, print(f"Need to install selective_scan_interface: pip install mamba_ssm")
 
@@ -24,18 +28,18 @@ class Mamba(nn.Module):
     def __init__(
         self,
         d_model,
-        d_state: int=16,
-        d_conv:int=4,
-        expand: int=2,
-        dt_rank: str="auto",
-        dt_min: float=0.001,
-        dt_max: float=0.1,
-        dt_init: str="random",
-        dt_scale: float=1.0,
-        dt_init_floor: float=1e-4,
-        conv_bias: bool=True,
-        bias: bool=False,
-        use_fast_path: bool=True,  # Fused kernel options
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dt_rank: str = "auto",
+        dt_min: float = 0.001,
+        dt_max: float = 0.1,
+        dt_init: str = "random",
+        dt_scale: float = 1.0,
+        dt_init_floor: float = 1e-4,
+        conv_bias: bool = True,
+        bias: bool = False,
+        use_fast_path: bool = True,  # Fused kernel options
         layer_idx=None,
         device=None,
         dtype=None,
@@ -155,7 +159,7 @@ class Mamba(nn.Module):
             x, z = xz.chunk(2, dim=1)
             # Compute short convolution
             if conv_state is not None:
-                conv_state.copy_(x[:, :, -self.d_conv :])  # Update state (B D W)
+                conv_state.copy_(x[:, :, -self.d_conv:])  # Update state (B D W)
             if causal_conv1d_fn is None:
                 x = self.act(self.conv1d(x)[..., :seqlen])
             else:
@@ -164,7 +168,6 @@ class Mamba(nn.Module):
                     x,
                     rearrange(self.conv1d.weight, "d 1 w -> d w"),
                     self.conv1d.bias,
-                    None,
                     self.activation,
                 )
 
@@ -197,7 +200,7 @@ class Mamba(nn.Module):
             out = self.out_proj(y)
         return out
 
-    def state_size(self, sequence_length: int=2048):
+    def state_size(self, sequence_length: int = 2048):
         return 2 * self.d_model * self.d_state
 
 
@@ -221,7 +224,7 @@ class MambaBlock(nn.Module):
         d_model = config.d_model
         self.residual_in_fp32 = residual_in_fp32
         self.fused_add_norm = fused_add_norm
-        #self.mixer = config.sequence_mixer.instantiate(d_model=d_model, **factory_kwargs)
+        # self.mixer = config.sequence_mixer.instantiate(d_model=d_model, **factory_kwargs)
         self.mixer = Mamba(d_model, **factory_kwargs, **config.sequence_mixer.kwargs)
         from zoology.mixers.mamba_ssm.triton.layernorm import RMSNorm
         self.norm = RMSNorm(d_model, eps=norm_epsilon)
@@ -268,7 +271,7 @@ def MambaInit(
     rescale_prenorm_residual=True,
     n_residuals_per_layer=1,  # Change to 2 if we have MLP
 ):
-    
+
     if isinstance(module, nn.Linear):
         if module.bias is not None:
             if not getattr(module.bias, "_no_reinit", False):
@@ -294,4 +297,3 @@ def MambaInit(
                 nn.init.kaiming_uniform_(p, a=math.sqrt(5))
                 with torch.no_grad():
                     p /= math.sqrt(n_residuals_per_layer * n_layer)
-

@@ -1,25 +1,25 @@
 """
-Linear attention in Based. 
+Linear attention in Based.
 """
-import math
+from typing import Optional, Tuple
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import opt_einsum as oe
 from einops import rearrange
-from typing import Optional, Tuple
 from pydantic import validate_call
 
 from zoology.utils import import_from_str
 
 try:
-    from transformers.models.llama.modeling_llama import apply_rotary_pos_emb, repeat_kv, LlamaRotaryEmbedding
+    from transformers.models.llama.modeling_llama import (LlamaRotaryEmbedding,
+                                                          apply_rotary_pos_emb,
+                                                          repeat_kv)
 except:
     print(f"Failed to import LlamaRotaryEmbedding... ")
 
 try:
     import sys
-    sys.path.append('/var/cr05_data/sim_data/code/based/')
+    sys.path.append('exp/sim_data/code/based/')
     from csrc import causal_dot_product  # linear attention cuda kernel
     print(f"Succesfully imported the causal dot product kernel... ")
 except:
@@ -27,7 +27,7 @@ except:
     print(f"Failed to import the causal dot product kernel... ")
 
 
-def init_feature_map(feature_map: str='none', **kwargs: any):
+def init_feature_map(feature_map: str = 'none', **kwargs: any):
     """
     Initialize query and key mapping for linear attention
     """
@@ -37,7 +37,7 @@ def init_feature_map(feature_map: str='none', **kwargs: any):
     # Taylor series approximations to exp(x)
     elif feature_map == 'taylor_exp':
         from zoology.mixers.feature_maps.taylor import TaylorExp
-        return TaylorExp(**kwargs) 
+        return TaylorExp(**kwargs)
     elif feature_map == "performer":
         from zoology.mixers.feature_maps.performer import PerformerFeatureMap
         return PerformerFeatureMap(**kwargs)
@@ -52,10 +52,11 @@ def init_feature_map(feature_map: str='none', **kwargs: any):
         return AllPolyMap(**kwargs)
     else:
         feature_map = import_from_str(feature_map)
-        return feature_map(**kwargs)   
+        return feature_map(**kwargs)
+
 
 class Based(nn.Module):
-    
+
     @validate_call
     def __init__(
         self,
@@ -69,7 +70,7 @@ class Based(nn.Module):
         eps: float = 1e-12,
         causal: bool = True,
         apply_rotary: bool = False,
-        rope_theta: int=10000.0,
+        rope_theta: int = 10000.0,
         train_view: str = "linear",
         **kwargs
     ):
@@ -78,14 +79,14 @@ class Based(nn.Module):
         self.l_max = l_max
         self.train_view = train_view
 
-        # linear attention 
+        # linear attention
         self.feature_name = feature_name
         self.feature_dim = feature_dim
         self.num_key_value_heads = num_key_value_heads
         self.num_heads = num_heads
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.head_dim = self.d_model // self.num_key_value_heads
-        self.causal=causal
+        self.causal = causal
         feature_map_kwargs = {
             'input_dim': self.feature_dim,
             'head_dim_idx': -1,
@@ -115,29 +116,29 @@ class Based(nn.Module):
             )
 
     def process_qkv(
-        self, 
+        self,
         hidden_states: torch.Tensor,
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         position_ids: Optional[torch.LongTensor] = None,
         use_cache: bool = False,
     ):
         """
-        Get Q, K, V tensors from hidden_states, e.g., by applying projections, 
+        Get Q, K, V tensors from hidden_states, e.g., by applying projections,
         positional embeddings, KV cache
         -> Follow the original LlamaAttention API
         """
         b, l, _ = hidden_states.size()
         q, k, v = self.proj_q(hidden_states), self.proj_k(hidden_states), self.proj_v(hidden_states)
-        
+
         # Following HF Llama source code to get (b, h, l, d)
         q = q.view(b, l, *self.q_shape).transpose(1, 2)
         k = k.view(b, l, *self.k_shape).transpose(1, 2)
         v = v.view(b, l, *self.v_shape).transpose(1, 2)
-        
+
         kv_seq_len = k.shape[-2]
         if past_key_value is not None:
             kv_seq_len += past_key_value[0].shape[-2]
-            
+
         # Apply rotary embeddings
         if position_ids is None:
             position_ids = torch.arange(
@@ -152,19 +153,18 @@ class Based(nn.Module):
             # Reuse k, v, self_attention
             k = torch.cat([past_key_value[0], k], dim=2)
             v = torch.cat([past_key_value[1], v], dim=2)
-            
+
         past_key_value = (k, v) if use_cache else None
 
         k = repeat_kv(k, self.num_key_value_groups)
         v = repeat_kv(v, self.num_key_value_groups)
         return q, k, v, kv_seq_len
 
-
     def forward(
-        self, 
-        hidden_states: torch.Tensor, 
-        filters: torch.Tensor=None, 
-        past_key_value: Optional[Tuple[torch.Tensor]] = None, 
+        self,
+        hidden_states: torch.Tensor,
+        filters: torch.Tensor = None,
+        past_key_value: Optional[Tuple[torch.Tensor]] = None,
         position_ids: Optional[torch.LongTensor] = None,
         use_cache: bool = False,
         *args, **kwargs
@@ -183,30 +183,31 @@ class Based(nn.Module):
             q = q.view(b, l, self.num_heads, self.feature_dim).transpose(1, 2)
             k = k.view(b, l, self.num_key_value_heads, self.feature_dim).transpose(1, 2)
             v = v.view(b, l, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        
+
         # Linear attention
         q, k = self.feature_map(q), self.feature_map(k)
-        
+
         # Compute attention
         if self.train_view == "linear":
             if causal_dot_product is not None and self.causal:
-                    v = causal_dot_product(q.contiguous().to(dtype=torch.float32), k.contiguous().to(dtype=torch.float32),v.contiguous().to(dtype=torch.float32),)
-                    z = 1 / (
-                        torch.einsum(
-                            "bhld,bhld->bhl", 
-                            q.to(dtype=torch.float32), 
-                            k.to(dtype=torch.float32).cumsum(2)
-                        ) + self.eps)
-                    y = v * z[..., None]
-                    y = y.to(hidden_states.dtype)
+                v = causal_dot_product(q.contiguous().to(dtype=torch.float32), k.contiguous().to(
+                    dtype=torch.float32), v.contiguous().to(dtype=torch.float32),)
+                z = 1 / (
+                    torch.einsum(
+                        "bhld,bhld->bhl",
+                        q.to(dtype=torch.float32),
+                        k.to(dtype=torch.float32).cumsum(2)
+                    ) + self.eps)
+                y = v * z[..., None]
+                y = y.to(hidden_states.dtype)
             else:
                 q, k, v = q.unsqueeze(-2), k.unsqueeze(-2), v.unsqueeze(-1)
                 if self.causal:
-                    y = ((q * (k * v).cumsum(dim=2)).sum(dim=-1) / 
-                        ((q * k.cumsum(dim=2)).sum(dim=-1) + self.eps))
+                    y = ((q * (k * v).cumsum(dim=2)).sum(dim=-1) /
+                         ((q * k.cumsum(dim=2)).sum(dim=-1) + self.eps))
                 else:
                     y = ((q * (k * v).sum(dim=2, keepdim=True)).sum(dim=-1) /
-                        ((q * k.sum(dim=2, keepdim=True)).sum(dim=-1) + self.eps))
+                         ((q * k.sum(dim=2, keepdim=True)).sum(dim=-1) + self.eps))
         elif self.train_view == "quadratic":
             cumsum_matrix = torch.tril(torch.ones((l, l))).to(q.device, q.dtype)
             A_qk = torch.einsum("bhnd,bhmd->bhnm", q, k) * cumsum_matrix
@@ -217,16 +218,13 @@ class Based(nn.Module):
         else:
             raise NotImplementedError(f"train_view {self.train_view} not implemented")
 
-                    
-
         y = rearrange(y, 'b h l d -> b l (h d)')
         y = self.proj_o(y.to(hidden_states.dtype))
         y = self.dropout(y)
-        return y.to(hidden_states.dtype) 
-    
+        return y.to(hidden_states.dtype)
 
-    def state_size(self, sequence_length: int=2048):
+    def state_size(self, sequence_length: int = 2048):
         return (
-            self.num_key_value_heads * self.head_dim * self.feature_map.expanded_size() + 
+            self.num_key_value_heads * self.head_dim * self.feature_map.expanded_size() +
             self.num_key_value_heads * self.feature_map.expanded_size()
         )

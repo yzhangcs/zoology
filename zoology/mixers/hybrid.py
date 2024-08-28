@@ -15,16 +15,14 @@ class Hybrid(nn.Module):
         self,
         d_model: int,
         configs: List[ModuleConfig],
-        layer_idx: int=None,
+        layer_idx: int = None,
         **kwargs
     ):
         super().__init__()
-        
+
         self.d_model = d_model
 
-        self.mixer = ModuleConfig(
-            **configs[layer_idx % len(configs)]
-        ).instantiate(d_model=d_model, layer_idx=layer_idx)
+        self.mixer = ModuleConfig(**configs[layer_idx % len(configs)]).instantiate(d_model=d_model, layer_idx=layer_idx)
 
     def forward(self, u, *args, **kwargs):
         """
@@ -33,8 +31,7 @@ class Hybrid(nn.Module):
         Returns:
             y: (b, l, d) tensor
         """
-        return  self.mixer(u, *args, **kwargs)
+        return self.mixer(u, *args, **kwargs)
 
     def state_size(self, **kwargs):
         return self.mixer.state_size(**kwargs)
-    

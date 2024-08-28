@@ -1,10 +1,9 @@
-from pathlib import Path
+# -*- coding: utf-8 -*-
 
 import wandb
-from torch.nn import Module
-
+from zoology.config import TrainConfig
 from zoology.model import LanguageModel
-from zoology.config import LoggerConfig, TrainConfig
+
 
 class WandbLogger:
     def __init__(self, config: TrainConfig):
@@ -14,9 +13,10 @@ class WandbLogger:
             return
         self.no_logger = False
         self.run = wandb.init(
+            id=config.run_id,
             name=config.run_id,
             entity=config.logger.entity,
-            project=config.logger.project_name, 
+            project=config.logger.project_name,
         )
         # wandb.run.log_code(
         #     root=str(Path(__file__).parent.parent),
@@ -29,13 +29,13 @@ class WandbLogger:
         self.run.config.update(config.model_dump(), allow_val_change=True)
 
     def log_model(
-        self, 
+        self,
         model: LanguageModel,
         config: TrainConfig
     ):
         if self.no_logger:
             return
-        
+
         max_seq_len = max([c.input_seq_len for c in config.data.test_configs])
         wandb.log(
             {
@@ -49,10 +49,8 @@ class WandbLogger:
         if self.no_logger:
             return
         wandb.log(metrics)
-    
+
     def finish(self):
         if self.no_logger:
             return
         self.run.finish()
-
-

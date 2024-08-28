@@ -1,19 +1,19 @@
-from datetime import datetime
-import os
+# -*- coding: utf-8 -*-
+
 import importlib.util
+import os
+from datetime import datetime
 
 import click
-from tqdm import tqdm
 
-from zoology.train import train
 from zoology.config import TrainConfig
-
+from zoology.train import train
 
 MAX_WORKERS_PER_GPU = 1
 
 
 def execute_config(config: TrainConfig):
-    try: 
+    try:
         train(config=config)
     except Exception as e:
         return config, e
@@ -35,7 +35,6 @@ def main(python_file, outdir, name: str, parallelize: bool, gpus: str):
     if gpus is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = gpus
 
-
     # Load the given Python file as a module
     spec = importlib.util.spec_from_file_location("config_module", python_file)
     config_module = importlib.util.module_from_spec(spec)
@@ -48,16 +47,17 @@ def main(python_file, outdir, name: str, parallelize: bool, gpus: str):
     use_ray = parallelize and len(configs) > 0
     if use_ray:
         import ray
-        # ray was killing workers due to OOM, but it didn't seem to be necessary 
+
+        # ray was killing workers due to OOM, but it didn't seem to be necessary
         os.environ["RAY_memory_monitor_refresh_ms"] = "0"
-        ray.init(ignore_reinit_error=True, log_to_driver=False)
+        ray.init(ignore_reinit_error=True, log_to_driver=True)
 
     name = name + datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     print(f"Running sweep {name} with {len(configs)} configs")
 
     # Run each script in parallel using Ray
     if not use_ray:
-        for config in configs: 
+        for config in configs:
             train(config)
     else:
         completed = 0
@@ -67,7 +67,7 @@ def main(python_file, outdir, name: str, parallelize: bool, gpus: str):
 
         remote = ray.remote(num_gpus=(1 // MAX_WORKERS_PER_GPU))(execute_config)
         futures = [remote.remote(config) for config in configs]
-        
+
         while futures:
             complete, futures = ray.wait(futures)
             for config, error in ray.get(complete):
@@ -79,7 +79,6 @@ def main(python_file, outdir, name: str, parallelize: bool, gpus: str):
             print(f"Completed: {completed} ({completed / total:0.1%} -- {failed} failed) | Total: {total}")
 
         ray.shutdown()
-
 
 
 if __name__ == "__main__":

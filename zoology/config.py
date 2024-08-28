@@ -5,7 +5,6 @@ from typing import List, Tuple, Union
 
 from pydantic import BaseModel
 
-
 from zoology.utils import import_from_str
 
 
@@ -18,13 +17,12 @@ class BaseConfig(BaseModel):
         parser.add_argument('--run_id', type=str, default=None, help='Run ID for the training')
         args, extra_args = parser.parse_known_args()
 
-
         if args.config is not None:
             with open(args.config) as file:
                 config = yaml.load(file, Loader=yaml.FullLoader)
         else:
             config = {}
-        
+
         # Override with any extra arguments from the command line
         def _nested_update(config, args):
             for key, value in args.items():
@@ -57,12 +55,14 @@ class FunctionConfig(BaseConfig):
     def instantiate(self):
         return partial(import_from_str(self.name), **self.kwargs)
 
+
 class ModuleConfig(BaseConfig):
     name: str
     kwargs: dict = {}
 
     def instantiate(self, **kwargs):
         return import_from_str(self.name)(**kwargs, **self.kwargs)
+
 
 class DataSegmentConfig(BaseConfig):
     """
@@ -74,7 +74,8 @@ class DataSegmentConfig(BaseConfig):
 
     def build(self, **kwargs):
         raise NotImplementedError()
-    
+
+
 class DataConfig(BaseConfig):
     train_configs: List[DataSegmentConfig]
     test_configs: List[DataSegmentConfig]
@@ -85,12 +86,14 @@ class DataConfig(BaseConfig):
     seed: int = 123
 
     cache_dir: str = None
-    force_cache: bool = False 
+    force_cache: bool = False
+    input_seq_len: int = 64
+
 
 class ModelConfig(BaseConfig):
     sequence_mixer: ModuleConfig = None
     state_mixer: ModuleConfig = ModuleConfig(
-        name="zoology.mixers.mlp.MLP", 
+        name="zoology.mixers.mlp.MLP",
         kwargs={"hidden_mult": 4}
     )
 
@@ -109,11 +112,12 @@ class ModelConfig(BaseConfig):
     block_type: str = "TransformerBlock"
     name: str = "default"
 
+
 class LoggerConfig(BaseConfig):
 
     project_name: str = None
     entity: str = None
-    
+
 
 class TrainConfig(BaseConfig):
     data: DataConfig

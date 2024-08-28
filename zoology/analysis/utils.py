@@ -1,27 +1,28 @@
 from typing import List
 
-import wandb
 import pandas as pd
 
+import wandb
 
-def flatten(data: dict, parent_key:str=None, sep: str='.'):
+
+def flatten(data: dict, parent_key: str = None, sep: str = '.'):
     """
     Flatten a multi-level nested collection of dictionaries and lists into a flat dictionary.
-    
-    The function traverses nested dictionaries and lists and constructs keys in the resulting 
+
+    The function traverses nested dictionaries and lists and constructs keys in the resulting
     flat dictionary by concatenating nested keys and/or indices separated by a specified separator.
-    
+
     Parameters:
     - data (dict or list): The multi-level nested collection to be flattened.
-    - parent_key (str, optional): Used in the recursive call to keep track of the current key 
+    - parent_key (str, optional): Used in the recursive call to keep track of the current key
                                   hierarchy. Defaults to an empty string.
     - sep (str, optional): The separator used between concatenated keys. Defaults to '.'.
-    
+
     Returns:
     - dict: A flat dictionary representation of the input collection.
-    
+
     Example:
-    
+
     >>> nested_data = {
     ...    "a": 1,
     ...    "b": {
@@ -50,12 +51,12 @@ def flatten(data: dict, parent_key:str=None, sep: str='.'):
 
 
 def unflatten(d: dict) -> dict:
-    """ 
+    """
     Takes a flat dictionary with '/' separated keys, and returns it as a nested dictionary.
-    
+
     Parameters:
     d (dict): The flat dictionary to be unflattened.
-    
+
     Returns:
     dict: The unflattened, nested dictionary.
     """
@@ -69,16 +70,16 @@ def unflatten(d: dict) -> dict:
             if part not in d:
                 d[part] = {}
             d = d[part]
-        
+
         if (isinstance(value, (np.float64, np.float32, float)) and np.isnan(value)):
             # need to check if value is nan, because wandb will create a column for every
             # possible value of a categorical variable, even if it's not present in the data
             continue
-        
+
         d[parts[-1]] = value
 
-
     # check if any dicts have contiguous numeric keys, which should be converted to list
+
     def convert_to_list(d):
         if isinstance(d, dict):
             try:
@@ -94,38 +95,36 @@ def unflatten(d: dict) -> dict:
     return convert_to_list(result)
 
 
-def fetch_wandb_runs(project_name: str, filters: dict=None, **kwargs) -> pd.DataFrame:
+def fetch_wandb_runs(project_name: str, filters: dict = None, **kwargs) -> pd.DataFrame:
     """
     Fetches run data from a W&B project into a pandas DataFrame.
-    
+
     Parameters:
     - project_name (str): The name of the W&B project.
-    
+
     Returns:
     - DataFrame: A pandas DataFrame containing the run data.
     """
     # Initialize an API client
     api = wandb.Api()
-    
+
     filters = {} if filters is None else filters
     for k, v in kwargs.items():
         if isinstance(v, List):
             filters[f"config.{k}"] = {"$in": v}
         else:
             filters[f"config.{k}"] = v
-    
+
     # Get all runs from the specified project (and entity, if provided)
     runs = api.runs(
         project_name,
         filters=filters
     )
-    
+
     # Create a list to store run data
     run_data = []
-
     # Iterate through each run and extract relevant data
     for run in runs:
-        
         data = {
             "run_id": run.id,
             "name": run.name,
@@ -136,10 +135,10 @@ def fetch_wandb_runs(project_name: str, filters: dict=None, **kwargs) -> pd.Data
             **flatten({**run.summary})
         }
         run_data.append(data)
-    
+
     # Convert list of run data into a DataFrame
     df = pd.DataFrame(run_data)
-    
+
     df = df.dropna(axis="columns", how="all")
 
     # can't be serialized
