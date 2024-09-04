@@ -2,17 +2,15 @@
 
 import uuid
 
-import numpy as np
-
 from zoology.config import DataConfig, LoggerConfig, ModelConfig, TrainConfig
 from zoology.data.associative_recall import MQARConfig
 
 sweep_id = uuid.uuid4().hex[:6]
 sweep_name = "monarch_attn" + sweep_id
 
-num_slots = 32
-gate_normalizer = 8
+gate_normalizer = 16
 num_layers = 4
+num_heads = 4
 
 VOCAB_SIZE = 8_192
 
@@ -58,13 +56,13 @@ for input_seq_len, num_kv_pairs in [
     )
 
     for d_model in [
-        64
-        # 128,
-        # 256,
-        # 512
+        64,
+        128,
+        256,
+        512
     ]:
-        # for lr in np.logspace(-4, -2, 4):
-        for lr in [5e-5, 1e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2]:
+        num_slots = d_model // 4
+        for lr in [1e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2]:
             MIXERS = {
                 "attention": dict(
                     name="zoology.mixers.attention.MHA",
@@ -145,7 +143,15 @@ for input_seq_len, num_kv_pairs in [
                     name="fla.layers.gla.GatedLinearAttention",
                     kwargs={
                         "mode": "fused_recurrent",
-                        "num_heads": 2
+                        "num_heads": 2,
+                        "expand_k": 1
+                    }
+                ),
+                "hgrn2": dict(
+                    name="fla.layers.hgrn2.HGRN2Attention",
+                    kwargs={
+                        "mode": "fused_recurrent",
+                        "expand_ratio": min(d_model, 128),
                     }
                 ),
                 "retnet": dict(
@@ -155,14 +161,16 @@ for input_seq_len, num_kv_pairs in [
                         "mode": "fused_recurrent"
                     }
                 ),
-                f"gsa-heads2-slots{num_slots}-gn{gate_normalizer}": dict(
+                "gsa": dict(
                     name="fla.layers.gsa.GatedSlotAttention",
                     kwargs={
                         "mode": "fused_recurrent",
-                        "num_heads": 2,
+                        "num_heads": num_heads,
                         "num_slots": num_slots,
                         "gate_logit_normalizer": gate_normalizer,
-                        "norm_first": False
+                        "elementwise_affine": True,
+                        "norm_first": False,
+                        "scale": None
                     }
                 ),
             }
@@ -176,7 +184,8 @@ for input_seq_len, num_kv_pairs in [
                 # "h3"
                 # "base_conv_explicit"
                 # "gla",
-                'gla'
+                # "hgrn2",
+                "gsa",
                 # "retnet"
                 # "mamba"
                 # "based",
