@@ -16,8 +16,8 @@ try:
 except:
     assert 0, print(f"Need to install causal_conv1d: pip install causal_conv1d")
 try:
-    from zoology.mixers.mamba_ssm.selective_scan_interface import (
-        mamba_inner_fn, selective_scan_fn)
+    from mamba_ssm.ops.selective_scan_interface import (mamba_inner_fn,
+                                                        selective_scan_fn)
 except:
     assert 0, print(f"Need to install selective_scan_interface: pip install mamba_ssm")
 
@@ -164,12 +164,15 @@ class Mamba(nn.Module):
                 x = self.act(self.conv1d(x)[..., :seqlen])
             else:
                 assert self.activation in ["silu", "swish"]
-                x = causal_conv1d_fn(
-                    x,
-                    rearrange(self.conv1d.weight, "d 1 w -> d w"),
-                    self.conv1d.bias,
-                    self.activation,
-                )
+                try:
+                    x = causal_conv1d_fn(
+                        x,
+                        rearrange(self.conv1d.weight, "d 1 w -> d w"),
+                        self.conv1d.bias,
+                        self.activation,
+                    )
+                except:
+                    breakpoint()
 
             # We're careful here about the layout, to avoid extra transposes.
             # We want dt to have d as the slowest moving dimension
