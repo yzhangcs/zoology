@@ -97,6 +97,30 @@ def _init_weights(
                 )
 
 
+# https://github.com/huggingface/transformers/blob/c28d04e9e252a1a099944e325685f14d242ecdcd/src/transformers/models/gpt2/modeling_gpt2.py#L454
+def _mamba_init_weights(
+    module,
+    n_layer,
+    initializer_range=0.02,  # Now only used for embedding layer.
+    rescale_prenorm_residual=True,
+    n_residuals_per_layer=1,  # Change to 2 if we have MLP
+):
+
+    if isinstance(module, nn.Linear):
+        if module.bias is not None:
+            if not getattr(module.bias, "_no_reinit", False):
+                nn.init.zeros_(module.bias)
+    elif isinstance(module, nn.Embedding):
+        nn.init.normal_(module.weight, std=initializer_range)
+
+    if rescale_prenorm_residual:
+        for name, p in module.named_parameters():
+            if "out_proj.weight" in name or "fc2.weight" in name:
+                nn.init.kaiming_uniform_(p, a=math.sqrt(5))
+                with torch.no_grad():
+                    p /= math.sqrt(n_residuals_per_layer * n_layer)
+
+
 class TransformerBlock(nn.Module):
 
     def __init__(self, config: ModelConfig, layer_idx: int):
@@ -161,7 +185,11 @@ class LMBackbone(nn.Module):
         )
         self.drop_f = nn.Dropout(config.resid_dropout)
         self.ln_f = nn.LayerNorm(config.d_model, eps=config.layer_norm_epsilon)
-        self.apply(partial(_init_weights, n_layers=config.n_layers,))
+
+        if config.block_type == 'TransformerBlock':
+            self.apply(partial(_init_weights, n_layers=config.n_layers,))
+        elif config.block_type == 'MambaBlock':
+            self.apply(partial(_mamba_init_weights, n_layer=config.n_layers))
 
     def forward(self, input_ids, position_ids=None):
         hidden_states = self.embeddings(
@@ -189,7 +217,10 @@ class LanguageModel(nn.Module):
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
-        self.apply(partial(_init_weights, n_layers=config.n_layers,))
+        if config.block_type == 'TransformerBlock':
+            self.apply(partial(_init_weights, n_layers=config.n_layers,))
+        elif config.block_type == 'MambaBlock':
+            self.apply(partial(_mamba_init_weights, n_layer=config.n_layers))
 
         # tie weights
         self.lm_head.weight = self.backbone.embeddings.word_embeddings.weight

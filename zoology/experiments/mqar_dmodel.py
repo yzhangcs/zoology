@@ -10,7 +10,6 @@ sweep_name = "monarch_attn" + sweep_id
 
 gate_normalizer = 16
 num_layers = 4
-num_heads = 4
 
 VOCAB_SIZE = 8_192
 
@@ -151,24 +150,23 @@ for input_seq_len, num_kv_pairs in [
                     name="fla.layers.hgrn2.HGRN2Attention",
                     kwargs={
                         "mode": "fused_recurrent",
-                        "expand_ratio": min(d_model, 128),
+                        "num_heads": 2,
                     }
                 ),
                 "retnet": dict(
                     name="fla.layers.multiscale_retention.MultiScaleRetention",
                     kwargs={
-                        "num_heads": 2,
-                        "mode": "fused_recurrent"
+                        "mode": "fused_recurrent",
+                        "num_heads": 2
                     }
                 ),
                 "gsa": dict(
                     name="fla.layers.gsa.GatedSlotAttention",
                     kwargs={
                         "mode": "fused_recurrent",
-                        "num_heads": num_heads,
+                        "num_heads": 4,
                         "num_slots": num_slots,
                         "gate_logit_normalizer": gate_normalizer,
-                        "elementwise_affine": True,
                         "norm_first": False,
                         "scale": None
                     }
@@ -189,7 +187,6 @@ for input_seq_len, num_kv_pairs in [
                 # "retnet"
                 # "mamba"
                 # "based",
-                # "mamba"
             ]:
                 if 'mamba' in sequence_mixer:
                     block_type = "MambaBlock"
